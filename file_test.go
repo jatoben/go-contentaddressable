@@ -24,13 +24,11 @@ func TestFile(t *testing.T) {
 	assertEqual(t, nil, err)
 	assertEqual(t, 3, n)
 
-	by, err := ioutil.ReadFile(filename)
+	created, err := aw.Accept()
+	assertEqual(t, created, true)
 	assertEqual(t, nil, err)
-	assertEqual(t, 0, len(by))
 
-	assertEqual(t, nil, aw.Accept())
-
-	by, err = ioutil.ReadFile(filename)
+	by, err := ioutil.ReadFile(filename)
 	assertEqual(t, nil, err)
 	assertEqual(t, "SUP", string(by))
 
@@ -49,18 +47,14 @@ func TestFileMismatch(t *testing.T) {
 	assertEqual(t, nil, err)
 	assertEqual(t, 3, n)
 
-	by, err := ioutil.ReadFile(filename)
-	assertEqual(t, nil, err)
-	assertEqual(t, 0, len(by))
-
-	err = aw.Accept()
+	created, err := aw.Accept()
 	if err == nil || !strings.Contains(err.Error(), "Content mismatch") {
 		t.Errorf("Expected mismatch error: %s", err)
 	}
-
-	by, err = ioutil.ReadFile(filename)
-	assertEqual(t, nil, err)
-	assertEqual(t, "", string(by))
+	assertEqual(t, created, false)
+	if _, err := os.Stat(filename); err == nil {
+		t.Fatalf("%s should not exist", filename)
+	}
 
 	assertEqual(t, nil, aw.Close())
 
@@ -86,33 +80,6 @@ func TestFileCancel(t *testing.T) {
 		if _, err := os.Stat(name); err == nil {
 			t.Errorf("%s exists?", name)
 		}
-	}
-}
-
-func TestFileLocks(t *testing.T) {
-	test := SetupFile(t)
-	defer test.Teardown()
-
-	filename := filepath.Join(test.Path, supOid)
-	aw, err := NewWithSuffix(filename, "-wat")
-	assertEqual(t, nil, err)
-	assertEqual(t, filename, aw.filename)
-	assertEqual(t, filename+"-wat", aw.tempFilename)
-
-	files := []string{aw.filename, aw.tempFilename}
-
-	for _, name := range files {
-		if _, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0665); err == nil {
-			t.Errorf("Able to open %s!", name)
-		}
-	}
-
-	assertEqual(t, nil, aw.Close())
-
-	for _, name := range files {
-		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0665)
-		assertEqualf(t, nil, err, "unable to open %s: %s", name, err)
-		cleanupFile(f)
 	}
 }
 

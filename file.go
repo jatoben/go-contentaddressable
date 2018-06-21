@@ -22,7 +22,6 @@ type File struct {
 	Oid          string
 	filename     string
 	tempFilename string
-	file         *os.File
 	tempFile     *os.File
 	hasher       hash.Hash
 }
@@ -33,9 +32,10 @@ func NewFile(filename string) (*File, error) {
 	return NewWithSuffix(filename, DefaultSuffix)
 }
 
-// NewWithSuffix initializes a content addressable file for writing.  It opens
-// both the given filename, and a temp filename in exclusive mode.  The *File
-// OID is taken from the base name of the given filename.
+// NewWithSuffix initializes a content addressable file for writing.
+// Data is written to a temporary file, and atomically renamed to the destination
+// filename when Accept() is called. The *File OID is taken from the base name
+// of the given filename.
 func NewWithSuffix(filename, suffix string) (*File, error) {
 	oid := filepath.Base(filename)
 	dir := filepath.Dir(filename)
@@ -49,17 +49,10 @@ func NewWithSuffix(filename, suffix string) (*File, error) {
 		return nil, err
 	}
 
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if err != nil {
-		cleanupFile(tempFile)
-		return nil, err
-	}
-
 	caw := &File{
 		Oid:          oid,
 		filename:     filename,
 		tempFilename: tempFilename,
-		file:         file,
 		tempFile:     tempFile,
 		hasher:       sha256.New(),
 	}
@@ -78,30 +71,33 @@ func (w *File) Write(p []byte) (int, error) {
 }
 
 // Accept verifies the written content SHA-256 signature matches the given OID.
-// If it matches, the temp file is renamed to the original filename.  If not,
-// an error is returned.
-func (w *File) Accept() error {
+// If it matches, the temp file is renamed to the destination filename.
+// Returns a bool indicating whether the destination file was created (if not,
+// someone else adding the same contents in parallel got there first), and
+// an error that might have occurred during the rename.
+func (w *File) Accept() (bool, error) {
 	if w.Closed() {
-		return AlreadyClosed
+		return false, AlreadyClosed
 	}
 
 	sig := hex.EncodeToString(w.hasher.Sum(nil))
 	if sig != w.Oid {
-		return fmt.Errorf("Content mismatch.  Expected OID %s, got %s", w.Oid, sig)
+		return false, fmt.Errorf("Content mismatch.  Expected OID %s, got %s", w.Oid, sig)
 	}
-
-	if err := cleanupFile(w.file); err != nil {
-		return err
-	}
-	w.file = nil
 
 	// flush any data to disk
 	w.tempFile.Close()
 	w.tempFile = nil
 
-	// rename the temp file to the real file
-	// no need to call Close() because w.tempFile and w.file are now nil
-	return os.Rename(w.tempFilename, w.filename)
+	// Only bother renaming the temp file if the destination file doesn't already exist.
+	// Since the SHA-256 must match, we can be confident that the contents are identical.
+	if _, err := os.Stat(w.filename); err != nil {
+
+		// rename the temp file to the real file
+		return true, os.Rename(w.tempFilename, w.filename)
+	}
+
+	return false, nil
 }
 
 // Close cleans up the internal file objects.
@@ -113,19 +109,12 @@ func (w *File) Close() error {
 		w.tempFile = nil
 	}
 
-	if w.file != nil {
-		if err := cleanupFile(w.file); err != nil {
-			return err
-		}
-		w.file = nil
-	}
-
 	return nil
 }
 
 // Closed reports whether this file object has been closed.
 func (w *File) Closed() bool {
-	if w.tempFile == nil || w.file == nil {
+	if w.tempFile == nil {
 		return true
 	}
 	return false
