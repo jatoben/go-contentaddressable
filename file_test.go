@@ -35,6 +35,36 @@ func TestFile(t *testing.T) {
 	assertEqual(t, nil, aw.Close())
 }
 
+func TestTempFileCleanup(t *testing.T) {
+	test := SetupFile(t)
+	defer test.Teardown()
+
+	filename := filepath.Join(test.Path, supOid)
+	tempFilename := filepath.Join(test.Path, supOid + DefaultSuffix)
+
+	aw, err := NewFile(filename)
+	assertEqual (t, nil, err)
+
+	// Put the destination file in place, so Accept() won't rename the
+	// temp file over the destination
+	fp, err := os.Create(filename)
+	assertEqual(t, nil, err)
+	defer fp.Close()
+
+	n, err := aw.Write([]byte("SUP"))
+	assertEqual(t, nil, err)
+	assertEqual(t, 3, n)
+
+	created, err := aw.Accept()
+	assertEqual(t, false, created)
+	assertEqual(t, nil, err)
+
+	assertEqual(t, nil, aw.Close())
+	if _, err := os.Stat(tempFilename); err == nil {
+		t.Fatalf("Temp file should not exist: %s", tempFilename)
+	}
+}
+
 func TestFileMismatch(t *testing.T) {
 	test := SetupFile(t)
 	defer test.Teardown()
