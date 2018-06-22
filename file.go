@@ -85,19 +85,17 @@ func (w *File) Accept() (bool, error) {
 		return false, fmt.Errorf("Content mismatch.  Expected OID %s, got %s", w.Oid, sig)
 	}
 
-	// flush any data to disk
-	w.tempFile.Close()
-	w.tempFile = nil
-
 	// Only bother renaming the temp file if the destination file doesn't already exist.
 	// Since the SHA-256 must match, we can be confident that the contents are identical.
 	if _, err := os.Stat(w.filename); err != nil {
+		w.tempFile.Close()
+		w.tempFile = nil
 
 		// rename the temp file to the real file
 		return true, os.Rename(w.tempFilename, w.filename)
 	}
 
-	return false, nil
+	return false, w.Close()
 }
 
 // Close cleans up the internal file objects.
